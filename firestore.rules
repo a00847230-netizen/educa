@@ -1,0 +1,30 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+    function isCoordinator() {
+      return signedIn() && exists(/databases/$(database)/documents/coordinators/$(request.auth.uid));
+    }
+
+    // Cada alumno lee y escribe solo su propio documento.
+    // Los coordinadores pueden leer a todos los alumnos.
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isCoordinator());
+      allow create, update: if signedIn() && request.auth.uid == uid;
+      allow delete: if false;
+    }
+
+    // Una cuenta se vuelve coordinador solo si escribe el código correcto.
+    // CAMBIA el código "EDUCA-COORD-2026" por uno propio antes de publicar.
+    // El código vive solo aquí, en las reglas, y nadie lo puede ver desde la app.
+    match /coordinators/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid
+                    && request.resource.data.code == "EDUCA-COORD-2026";
+      allow update, delete: if false;
+    }
+  }
+}
