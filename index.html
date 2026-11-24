@@ -205,6 +205,7 @@ input[type=password]{font:inherit;color:var(--ink);background:var(--surface);bor
 .feedback>div{display:flex;flex-direction:column;gap:4px}
 .feedback .mascot{width:52px;height:auto}
 .lock{flex-direction:row;align-items:center;gap:14px}
+.lock .mascot,.greet .mascot,.lp-final .mascot{flex:none}
 .seg{display:inline-flex;border:2px solid var(--line);border-radius:12px;overflow:hidden}
 .seg button{border:0;background:var(--surface);color:var(--ink);padding:8px 12px;font-weight:700;font-size:14px}
 .seg button[aria-pressed="true"]{background:var(--brand);color:var(--brand-ink)}
@@ -1323,38 +1324,29 @@ function onboard(pre,cred){
       <h1>¿Cuánto inglés sabes, ${esc(draft.name.split(" ")[0])}?</h1>
       <p class="muted">Así empiezas en el nivel correcto del plan de estudios.</p>
       <div class="choice">
-        <button aria-pressed="true" data-c="test"><b>Hacer examen de colocación</b><span class="muted">12 preguntas, unos 4 minutos</span></button>
+        <button aria-pressed="true" data-c="test"><b>Hacer examen de colocación</b><span class="muted">Gramática, Speaking y Writing, unos 12 minutos</span></button>
         <button aria-pressed="false" data-c="zero"><b>Empezar desde cero</b><span class="muted">Comienzas en A1 Principiante</span></button>
       </div>
       <button class="btn block" id="next2">Continuar</button>
       <button class="btn ghost block" id="back2">Regresar</button>`);
     view.querySelectorAll(".choice button").forEach(b=>b.onclick=()=>{choice=b.dataset.c;view.querySelectorAll(".choice button").forEach(x=>x.setAttribute("aria-pressed",x===b));});
     $("#back2").onclick=step1;
-    $("#next2").onclick=()=>choice==="zero"?finish("A1",null):placement();
-  }
-  function placement(){
-    let i=0;const answers=[];
-    const ask=()=>{
-      const q=PLACEMENT[i];
-      shell(`<div class="steps"><i class="on"></i><i class="on"></i><i class="on"></i></div>
-        <span class="eyebrow">Examen de colocación · ${i+1} de ${PLACEMENT.length}</span>
-        <div class="bar"><i style="width:${i/PLACEMENT.length*100}%"></i></div>
-        <p class="prompt">${esc(q.q)}</p>
-        <div class="opts">${q.o.map((o,k)=>`<button class="opt" data-k="${k}">${esc(o)}</button>`).join("")}<button class="opt" data-k="-1">No sé</button></div>`);
-      view.querySelectorAll(".opt").forEach(b=>b.onclick=()=>{answers.push(+b.dataset.k===q.a);i++;i<PLACEMENT.length?ask():done();});
+    $("#next2").onclick=async()=>{
+      if(choice==="zero") return finish({level:"A1",gScore:null,placement:null});
+      if(cred&&!UID){
+        shell(`<div class="loading"><div class="dot"></div><p class="muted">Preparando tu examen…</p></div>`);
+        try{UID=await BE.signUp(cred.email,cred.pass);}
+        catch(e){shell(`<section class="card"><h2>No pudimos crear tu cuenta</h2><p class="err">${esc(authMsg(e))}</p><button class="btn" id="bk">Volver</button></section>`);$("#bk").onclick=()=>gate("signup");return;}
+      }
+      runPlacement(draft.name.split(" ")[0],finish,step2);
     };
-    const done=()=>{
-      let lv=0;
-      for(let k=0;k<LEVELS.length;k++){const ok=PLACEMENT.filter((q,n)=>q.lv===LEVELS[k].id&&answers[n]).length;if(ok===2)lv=k+1;else break;}
-      finish(LEVELS[Math.min(lv,LEVELS.length-1)].id,answers.filter(Boolean).length);
-    };
-    ask();
   }
-  async function finish(level,score){
+  async function finish(res){
+    const level=res.level, score=res.gScore;
     shell(`<div class="loading"><div class="dot"></div><p class="muted">Creando tu cuenta…</p></div>`);
     try{
-      if(cred) UID=await BE.signUp(cred.email,cred.pass);
-      PROFILE={name:draft.name,email:draft.email||cred&&cred.email||"",age:draft.age,goal:draft.goal,area:draft.area,minutes:+draft.minutes,startLevel:level,placementScore:score,createdAt:new Date().toISOString()};
+      if(cred&&!UID) UID=await BE.signUp(cred.email,cred.pass);
+      PROFILE={name:draft.name,email:draft.email||cred&&cred.email||"",age:draft.age,goal:draft.goal,area:draft.area,minutes:+draft.minutes,startLevel:level,placementScore:score,placement:res.placement||null,createdAt:new Date().toISOString()};
       P=freshProgress();
       await BE.create(UID,PROFILE,P);
     }catch(e){
@@ -1362,11 +1354,12 @@ function onboard(pre,cred){
       $("#bk").onclick=()=>gate();return;
     }
     const L=LEVELS[lvIndex(level)];
-    shell(`<section class="hero" style="text-align:center;align-items:center">
+    SFX.complete();
+    shell(`<div class="result-ajo">${mascot("cheer",110)}</div><section class="hero" style="text-align:center;align-items:center">
       <span class="eyebrow">Tu cuenta está lista</span>
       <h1>Empiezas en ${L.id} · ${L.name}</h1>
-      <p>${score===null?"Comenzarás desde las bases.":`Acertaste ${score} de ${PLACEMENT.length} preguntas.`} Meta del nivel. ${esc(L.goal)}.</p>
-      <button class="btn" id="enter">Entrar a Educa</button></section>`);
+      <p>${score===null?"Comenzarás desde las bases.":`Acertaste ${score} de ${PLACEMENT.length} preguntas de gramática.`} Meta del nivel. ${esc(L.goal)}.</p>
+      <button class="btn" id="enter">Entrar a Educa</button></section>${placementSummary(res.placement,L.id)}`);
     $("#enter").onclick=()=>{try{history.replaceState(null,"","#");}catch(e){}start();};
   }
 }
@@ -1468,6 +1461,7 @@ function coordUser(u,info){
     <div class="row" style="justify-content:space-between"><span>Edad</span><b>${esc(u.profile.age)}</b></div>
     <div class="row" style="justify-content:space-between"><span>Tiempo diario</span><b>${u.profile.minutes} min</b></div>
     <div class="row" style="justify-content:space-between"><span>Colocación</span><b>${u.profile.startLevel}${u.profile.placementScore!=null?` · ${u.profile.placementScore}/12`:" · desde cero"}</b></div>
+    ${u.profile.placement?`<div class="row" style="justify-content:space-between"><span>Por habilidad</span><b>Gramática ${u.profile.placement.grammar} · Speaking ${u.profile.placement.speaking||"pendiente"} · Writing ${u.profile.placement.writing}</b></div>`:""}
     <div class="row" style="justify-content:space-between"><span>Registro</span><b>${esc((u.profile.createdAt||"").slice(0,10))}</b></div>
   </section>
   <section class="card"><span class="eyebrow">Habilidades, todo el plan</span>
@@ -1475,16 +1469,229 @@ function coordUser(u,info){
   <section class="card"><span class="eyebrow">Exámenes de nivel</span>${LEVELS.map(l=>{const e=p.exams[l.id];return `<div class="row" style="justify-content:space-between"><span>${l.id} · ${l.name}</span><span class="pill ${e&&e.passed?"ok":""}">${e?`${e.best}%${e.passed?" · aprobado":""}`:"Sin presentar"}</span></div>`;}).join("")}</section>
   <section class="card"><span class="eyebrow">Lecciones resueltas</span>${Object.keys(p.lessons).length?LESSONS.filter(l=>p.lessons[l.id]).map(l=>{const r=p.lessons[l.id];return `<div class="row" style="justify-content:space-between"><span style="font-size:14px">${l.level} · ${skillName(l.skill)} · ${esc(l.title)}</span><span class="pill ${r.passed?"ok":""}">${r.best}% · ${r.attempts} ${r.attempts===1?"intento":"intentos"}</span></div>`;}).join(""):`<p class="muted">Todavía no resuelve lecciones.</p>`}</section>
   <section class="card"><span class="eyebrow">Conversaciones con el tutor</span>${t.length?t.map(x=>`<div class="row" style="justify-content:space-between"><span style="font-size:14px">${esc(x.title)} · ${esc(x.level)} · ${esc(x.date)}</span><span class="pill sk">${x.score}/100</span></div>`).join(""):`<p class="muted">Sin conversaciones.</p>`}</section>
+  ${u.profile.placement&&(u.profile.placement.writeText||u.profile.placement.speakText)?`<section class="card"><span class="eyebrow">Examen de colocación</span>${u.profile.placement.speakText?`<details><summary style="cursor:pointer;font-weight:700">Lo que dijo en Speaking</summary><p style="margin-top:8px">${esc(u.profile.placement.speakText)}</p></details>`:""}${u.profile.placement.writeText?`<details><summary style="cursor:pointer;font-weight:700">Lo que escribió en Writing</summary><p style="white-space:pre-line;margin-top:8px">${esc(u.profile.placement.writeText)}</p></details>`:""}</section>`:""}
   ${Object.keys(p.essays||{}).length?`<section class="card"><span class="eyebrow">Textos escritos</span>${Object.entries(p.essays).map(([k,v])=>{const l=LESSONS.find(x=>x.id===k.split("_")[0]);return `<details><summary style="cursor:pointer;font-weight:700">${esc(l?l.title:k)} · ${v.split(/\s+/).filter(Boolean).length} palabras</summary><p style="white-space:pre-line;margin-top:8px">${esc(v)}</p></details>`;}).join("")}</section>`:""}
   <p class="note">Pendientes en su repaso. ${p.review.length} preguntas.</p>`;
   $("#cb").onclick=()=>coordHome(info);
   window.scrollTo(0,0);
 }
 function downloadCSV(){
-  const head=["Nombre","Correo","Edad","Meta","Área","Nivel inicial","Nivel actual","XP","Racha","Lecciones completas","Promedio lecciones","Conversaciones tutor","Promedio tutor","Última actividad","Registro"];
-  const rows=CUSERS.map(u=>{const t=uTutor(u);return [u.profile.name,u.profile.email,u.profile.age,u.profile.goal,u.profile.area,u.profile.startLevel,uLevel(u),u.progress.xp,u.progress.streak,uDone(u),uAvg(u)??"",t.length,t.length?Math.round(t.reduce((s,x)=>s+x.score,0)/t.length):"",u.lastActive?new Date(u.lastActive).toISOString().slice(0,10):"",(u.profile.createdAt||"").slice(0,10)];});
+  const head=["Nombre","Correo","Edad","Meta","Área","Nivel inicial","Gramática","Speaking","Writing","Nivel actual","XP","Racha","Lecciones completas","Promedio lecciones","Conversaciones tutor","Promedio tutor","Última actividad","Registro"];
+  const rows=CUSERS.map(u=>{const t=uTutor(u);return [u.profile.name,u.profile.email,u.profile.age,u.profile.goal,u.profile.area,u.profile.startLevel,(u.profile.placement||{}).grammar||"",(u.profile.placement||{}).speaking||"",(u.profile.placement||{}).writing||"",uLevel(u),u.progress.xp,u.progress.streak,uDone(u),uAvg(u)??"",t.length,t.length?Math.round(t.reduce((s,x)=>s+x.score,0)/t.length):"",u.lastActive?new Date(u.lastActive).toISOString().slice(0,10):"",(u.profile.createdAt||"").slice(0,10)];});
   const csv="﻿"+[head,...rows].map(r=>r.map(c=>`"${String(c??"").replace(/"/g,'""')}"`).join(",")).join("\n");
   const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));a.download=`educa-alumnos-${today()}.csv`;document.body.appendChild(a);a.click();a.remove();
+}
+
+/* =====================================================================
+   EXAMEN DE COLOCACIÓN COMPLETO
+   Gramática y vocabulario, Speaking (lectura en voz alta y respuesta
+   libre) y Writing. Cada habilidad recibe su propio nivel MCER.
+   ===================================================================== */
+const READ_ALOUD=[
+  {lv:"A1",t:"My name is Laura and I live in Monterrey."},
+  {lv:"A2",t:"Last weekend I visited my grandparents and we cooked together."},
+  {lv:"B1",t:"I have been studying English for two years because I want a better job."},
+  {lv:"B2",t:"If I had known about the scholarship earlier, I would have applied immediately."},
+  {lv:"C1",t:"Although the results were encouraging, the researchers emphasized that further studies were necessary."}
+];
+const SPEAK_TASK="Tell me about yourself. Talk about your studies or your work, what you like to do, and why you want to learn English.";
+const WRITE_TASK="Write about yourself and your plans for the next five years. Explain why English is important for those plans.";
+
+function recorder(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition; if(!SR) return null;
+  let rec=null, finalT="";
+  return {
+    start(cb){
+      try{rec&&rec.abort();}catch(e){}
+      finalT=""; rec=new SR(); rec.lang="en-US"; rec.continuous=true; rec.interimResults=true;
+      rec.onresult=ev=>{let interim="";for(let i=ev.resultIndex;i<ev.results.length;i++){const t=ev.results[i][0].transcript;if(ev.results[i].isFinal)finalT+=" "+t;else interim+=t;}cb.update&&cb.update(finalT.trim(),interim);};
+      rec.onerror=ev=>cb.error&&cb.error(ev.error);
+      rec.onend=()=>cb.end&&cb.end(finalT.trim());
+      try{rec.start();cb.started&&cb.started();}catch(e){cb.error&&cb.error("start");}
+    },
+    stop(){try{rec&&rec.stop();}catch(e){}}
+  };
+}
+function readScore(target,heard){
+  const t=norm(target).split(" "), h=new Set(norm(heard).split(" "));
+  return t.filter(w=>h.has(w)).length/t.length;
+}
+/* Calificación automática cuando la IA no está conectada */
+function heurLevel(text,kind){
+  const raw=String(text||"").trim(); if(!raw) return 0;
+  const words=raw.split(/\s+/).filter(Boolean); const n=words.length;
+  const low=raw.toLowerCase();
+  const es=(low.match(/\b(el|la|los|las|que|de|para|porque|yo|mi|es|con|una|pero)\b/g)||[]).length;
+  if(es>n*0.25) return 0;
+  if(n<12) return 0;
+  const sentences=raw.split(/[.!?]+/).map(s=>s.trim()).filter(Boolean);
+  const avg=kind==="speak"?Math.min(n,18):n/Math.max(1,sentences.length);
+  const uniq=new Set(words.map(w=>w.toLowerCase().replace(/[^a-z']/g,""))).size/n;
+  let pts=0;
+  if(n>=25)pts++; if(n>=55)pts++; if(n>=95)pts++;
+  if(uniq>.55)pts++; if(avg>=10)pts++;
+  if(/\b(was|were|went|had|did|made|studied|worked|lived|started|wanted)\b/.test(low))pts++;
+  if(/\b(will|going to|plan to|hope to)\b/.test(low))pts++;
+  if(/\b(have|has|i've|we've)\s+(been|done|gone|seen|made|had|taken|studied|worked|lived|learned|learnt)\b/.test(low))pts++;
+  if(/\bwould\b|\bif\b[^.]*\b(will|would|could)\b/.test(low))pts++;
+  if(/\b(because|so|when|although|however|while|unless)\b/.test(low))pts++;
+  if(/\b(however|although|whereas|despite|in spite of|therefore|moreover|furthermore|nevertheless|on the other hand|in addition)\b/.test(low))pts++;
+  if(/\b(not only|had i|it is essential that|notwithstanding|nonetheless|which|whom)\b/.test(low))pts++;
+  if(/\b(is|are|was|were|been|be)\s+\w+ed\b/.test(low))pts++;
+  let lv=pts<=2?0:pts<=4?1:pts<=6?2:pts<=8?3:4;
+  const capA2=kind==="speak"?30:40, capB2=kind==="speak"?80:95;
+  if(n<capA2) lv=Math.min(lv,1);
+  if(n<capB2) lv=Math.min(lv,3);
+  return lv;
+}
+async function aiLevel(kind,text,extra){
+  if(!BE.ai||!text) return null;
+  const task=kind==="speak"?SPEAK_TASK:WRITE_TASK;
+  const prompt=`You are a certified CEFR examiner. Rate this ${kind==="speak"?"spoken answer (an automatic speech-to-text transcript, so ignore punctuation and capitalization)":"writing sample"} by a young Mexican learner of English.
+Task: "${task}"
+${extra||""}
+Learner's ${kind==="speak"?"transcript":"text"}:
+"""${String(text).slice(0,2500)}"""
+Judge range, accuracy, coherence${kind==="speak"?", fluency":""} and task achievement with the CEFR descriptors. A very short or off-task answer gets a low level.
+Respond ONLY with JSON {"level":"A1|A2|B1|B2|C1|C2","strength":"una fortaleza breve en español","improve":"qué mejorar, breve en español"}`;
+  try{const r=await BE.ai(prompt,"default");return r&&lvIndex(r.level)>=0?r:null;}catch(e){return null;}
+}
+
+function runPlacement(firstName,onDone,onCancel){
+  const R={answers:[],read:[],speakText:"",writeText:"",micOk:true};
+  const head=(part,title)=>`<div class="steps"><i class="${part>=1?"on":""}"></i><i class="${part>=2?"on":""}"></i><i class="${part>=3?"on":""}"></i></div><span class="eyebrow">Examen de colocación · Parte ${part} de 3 · ${title}</span>`;
+  intro();
+  function intro(){
+    shell(`<div class="greet">${mascot("wave",80)}${bubble(`¡Vamos, ${firstName}! Son tres partes. Gramática, Speaking y Writing.`)}</div>
+      <section class="card"><h3>Cómo funciona</h3>
+      <div class="ex-line"><div><b style="font-size:16px">1. Gramática y vocabulario</b><p class="muted">12 preguntas de opción múltiple</p></div></div>
+      <div class="ex-line"><div><b style="font-size:16px">2. Speaking</b><p class="muted">Lees 5 frases en voz alta y hablas un minuto sobre ti</p></div></div>
+      <div class="ex-line"><div><b style="font-size:16px">3. Writing</b><p class="muted">Escribes un texto corto sobre tus planes</p></div></div>
+      <p class="note">Toma unos 12 minutos. Para Speaking usa Chrome o Edge y permite el micrófono. Si contestas "No sé" no pasa nada, así encontramos tu nivel real.</p></section>
+      <button class="btn block" id="go">Empezar</button>${onCancel?`<button class="btn ghost block" id="cancel">Regresar</button>`:""}`);
+    $("#go").onclick=grammar; if(onCancel) $("#cancel").onclick=onCancel;
+  }
+  function grammar(){
+    let i=0;
+    const ask=()=>{
+      const q=PLACEMENT[i];
+      shell(`${head(1,"Gramática y vocabulario")}
+        <div class="bar"><i style="width:${i/PLACEMENT.length*100}%"></i></div>
+        <p class="muted" style="font-size:14px">Pregunta ${i+1} de ${PLACEMENT.length}</p>
+        <p class="prompt">${esc(q.q)}</p>
+        <div class="opts">${q.o.map((o,k)=>`<button class="opt" data-k="${k}">${esc(o)}</button>`).join("")}<button class="opt" data-k="-1">No sé</button></div>`);
+      view.querySelectorAll(".opt").forEach(b=>b.onclick=()=>{R.answers.push(+b.dataset.k===q.a);SFX.tap();i++;i<PLACEMENT.length?ask():readAloud();});
+    };
+    ask();
+  }
+  function readAloud(){
+    const rc=recorder();
+    if(!rc){R.micOk=false;return noMic();}
+    let i=0;
+    const show=()=>{
+      const s=READ_ALOUD[i]; let best=0, heardTxt="";
+      shell(`${head(2,"Speaking")}
+        <div class="bar"><i style="width:${i/READ_ALOUD.length*50}%"></i></div>
+        <p class="muted" style="font-size:14px">Lectura en voz alta · Frase ${i+1} de ${READ_ALOUD.length}</p>
+        <p class="prompt">Lee esta frase en voz alta</p>
+        <section class="card"><b style="font-family:var(--display);font-size:21px;line-height:1.35">${esc(s.t)}</b></section>
+        <button class="mic" id="mic" aria-label="Grabar">🎙️</button><p class="note" style="text-align:center" id="mn">Toca el micrófono, lee la frase y vuelve a tocar para terminar</p>
+        <div class="heard" id="hd"><span class="muted">Aquí aparecerá lo que digas.</span></div>
+        <button class="btn block" id="nx" disabled>Siguiente</button>
+        <button class="btn ghost block" id="nomic">No puedo usar el micrófono ahora</button>`);
+      const mic=$("#mic");
+      const paint=(t,interim)=>{const h=new Set(norm(t).split(" "));$("#hd").innerHTML=(t||interim)?`<div>${s.t.split(" ").map(w=>`<span class="${h.has(norm(w))?"hit":"miss"}">${esc(w)}</span>`).join(" ")}</div><div class="muted" style="font-size:14px;margin-top:6px">Te escuché. «${esc((t+" "+(interim||"")).trim())}»</div>`:`<span class="muted">Aquí aparecerá lo que digas.</span>`;};
+      mic.onclick=()=>{
+        if(mic.classList.contains("on")){rc.stop();return;}
+        rc.start({started:()=>{mic.classList.add("on");$("#mn").textContent="Te escucho… toca otra vez para terminar";},
+          update:(t,im)=>{heardTxt=t;paint(t,im);},
+          error:e=>{mic.classList.remove("on");if(e==="not-allowed"||e==="service-not-allowed"){R.micOk=false;toast("El navegador no dejó usar el micrófono.");}},
+          end:t=>{mic.classList.remove("on");heardTxt=t||heardTxt;const sc=readScore(s.t,heardTxt);best=Math.max(best,sc);paint(heardTxt,"");$("#mn").textContent=heardTxt?`Leíste bien ${Math.round(sc*100)}% de las palabras. Puedes intentarlo otra vez o seguir.`:"No te escuché. Toca el micrófono e inténtalo otra vez.";$("#nx").disabled=!heardTxt;}});
+      };
+      $("#nx").onclick=()=>{R.read.push({lv:s.lv,score:Math.round(best*100)});i++;i<READ_ALOUD.length?show():openSpeak(rc);};
+      $("#nomic").onclick=()=>{rc.stop();R.micOk=false;R.read=[];noMic();};
+    };
+    show();
+  }
+  function noMic(){
+    shell(`${head(2,"Speaking")}
+      <section class="card lock">${mascot("think",80)}<div class="stack" style="gap:6px"><h3>Speaking queda pendiente</h3><p class="muted">Para calificar tu Speaking necesitamos escucharte. Abre Educa en Google Chrome o Microsoft Edge y permite el micrófono. Puedes repetir el examen después desde Mi cuenta.</p></div></section>
+      <button class="btn block" id="nx">Seguir con Writing</button>`);
+    $("#nx").onclick=writing;
+  }
+  function openSpeak(rc){
+    let txt="", t0=0, timer=null;
+    shell(`${head(2,"Speaking")}
+      <div class="bar"><i style="width:60%"></i></div>
+      <p class="muted" style="font-size:14px">Respuesta libre · Habla entre 30 segundos y 1 minuto</p>
+      <p class="prompt">${esc(SPEAK_TASK)}</p>
+      <p class="muted" style="font-size:14px">Habla de tus estudios o tu trabajo, lo que te gusta hacer y por qué quieres aprender inglés.</p>
+      <button class="speak" id="hear" style="align-self:flex-start">🔊 Escuchar la pregunta</button>
+      <button class="mic" id="mic" aria-label="Grabar">🎙️</button><p class="note" style="text-align:center" id="mn">Toca el micrófono para empezar a hablar</p>
+      <div class="heard" id="hd" style="min-height:90px"><span class="muted">Aquí aparecerá lo que digas.</span></div>
+      <button class="btn block" id="nx" disabled>Siguiente</button>
+      <button class="btn ghost block" id="skip">Saltar esta parte</button>`);
+    $("#hear").onclick=()=>say(SPEAK_TASK);
+    const mic=$("#mic");
+    const stopT=()=>{clearInterval(timer);timer=null;};
+    mic.onclick=()=>{
+      if(mic.classList.contains("on")){rc.stop();return;}
+      rc.start({started:()=>{mic.classList.add("on");t0=Date.now();timer=setInterval(()=>{const s=Math.round((Date.now()-t0)/1000);$("#mn").textContent=`Te escucho… ${s} s. Toca otra vez para terminar.`;if(s>=90)rc.stop();},500);},
+        update:(t,im)=>{txt=t;$("#hd").textContent=(t+" "+(im||"")).trim()||"…";},
+        error:()=>{},
+        end:t=>{mic.classList.remove("on");stopT();txt=t||txt;const n=txt.split(/\s+/).filter(Boolean).length;$("#mn").textContent=n>=8?`Te escuché ${n} palabras. Puedes seguir o grabar otra vez.`:"Te escuché muy poco. Toca el micrófono e inténtalo otra vez.";$("#nx").disabled=n<8;}});
+    };
+    $("#nx").onclick=()=>{R.speakText=txt;writing();};
+    $("#skip").onclick=()=>{rc.stop();stopT();R.speakText="";writing();};
+  }
+  function writing(){
+    shell(`${head(3,"Writing")}
+      <p class="prompt">${esc(WRITE_TASK)}</p>
+      <p class="muted" style="font-size:14px">Escribe en inglés sobre ti y tus planes para los próximos cinco años, y por qué el inglés es importante para ellos. Entre 60 y 150 palabras.</p>
+      <textarea id="wt" placeholder="Write here…"></textarea>
+      <div class="count" id="wc">0 palabras</div>
+      <button class="btn block" id="nx" disabled>Terminar examen</button>
+      <button class="btn ghost block" id="cant">Todavía no puedo escribir en inglés</button>`);
+    const ta=$("#wt");
+    ta.oninput=()=>{const n=ta.value.trim().split(/\s+/).filter(Boolean).length;$("#wc").textContent=`${n} palabras${n<30?" · mínimo 30 para terminar":""}`;$("#nx").disabled=n<30;};
+    $("#nx").onclick=()=>{R.writeText=ta.value.trim();score();};
+    $("#cant").onclick=()=>{R.writeText="";score();};
+  }
+  async function score(){
+    shell(`<div class="loading">${mascot("think",110)}<p class="muted">Calificando tu examen…</p></div>`);
+    let g=0;
+    for(let k=0;k<LEVELS.length;k++){const ok=PLACEMENT.filter((q,n)=>q.lv===LEVELS[k].id&&R.answers[n]).length;if(ok===2)g=k+1;else break;}
+    g=Math.min(g,LEVELS.length-1);
+    let readLv=null;
+    if(R.read.length){let passes=0;for(const r of R.read){if(r.score>=75)passes++;else break;}readLv=Math.max(0,passes-1);}
+    const readInfo=R.read.length?`Read-aloud accuracy by level: ${R.read.map(r=>r.lv+" "+r.score+"%").join(", ")}.`:"";
+    const [sAI,wAI]=await Promise.all([R.speakText?aiLevel("speak",R.speakText,readInfo):null,R.writeText?aiLevel("write",R.writeText):null]);
+    let s=null;
+    if(R.read.length||R.speakText){
+      const open=R.speakText?(sAI?lvIndex(sAI.level):heurLevel(R.speakText,"speak")):null;
+      s=open===null?readLv:readLv===null?open:Math.floor((readLv+open)/2+.25);
+    }
+    const w=R.writeText?(wAI?lvIndex(wAI.level):heurLevel(R.writeText,"write")):0;
+    const parts=[g,w].concat(s===null?[]:[s]);
+    const overall=Math.min(LEVELS.length-1,Math.floor(parts.reduce((a,b)=>a+b,0)/parts.length+.25));
+    const res={level:LEVELS[overall].id,gScore:R.answers.filter(Boolean).length,
+      placement:{grammar:LEVELS[g].id,speaking:s===null?null:LEVELS[s].id,writing:LEVELS[w].id,
+        method:(sAI||wAI)?"ai":"auto",read:R.read,speakText:R.speakText.slice(0,2000),writeText:R.writeText.slice(0,2000),
+        feedback:{speaking:sAI?{strength:sAI.strength,improve:sAI.improve}:null,writing:wAI?{strength:wAI.strength,improve:wAI.improve}:null},
+        date:new Date().toISOString()}};
+    onDone(res);
+  }
+}
+function placementSummary(pl,overall){
+  if(!pl) return "";
+  const row=(k,v,lab)=>`<div class="row" style="justify-content:space-between"><span>${lab}</span><span class="pill ${v?"sk":""}">${v||"Pendiente"}</span></div>`;
+  const fb=pl.feedback||{};
+  return `<section class="card"><span class="eyebrow">Tu nivel por habilidad</span>
+    ${row("g",pl.grammar,"Gramática y vocabulario")}${row("s",pl.speaking,"Speaking")}${row("w",pl.writing,"Writing")}
+    <div class="row" style="justify-content:space-between;border-top:1px solid var(--line);padding-top:10px"><b>Nivel para empezar</b><span class="pill ok">${overall}</span></div>
+    ${fb.speaking?`<p class="note">🗣️ ${esc(fb.speaking.strength)} ${esc(fb.speaking.improve)}</p>`:""}
+    ${fb.writing?`<p class="note">✍️ ${esc(fb.writing.strength)} ${esc(fb.writing.improve)}</p>`:""}
+    <p class="note">${pl.method==="ai"?"Speaking y Writing calificados con IA según el Marco Común Europeo.":"Speaking y Writing calificados automáticamente. Con la IA conectada la calificación es más precisa."}</p></section>`;
 }
 
 /* =====================================================================
@@ -1684,7 +1891,12 @@ function speakUI(e,body,ready){
       if(mic.classList.contains("on")){DICT.stop().catch(()=>{});return;}
       heard="";live="";paint();
       DICT.start({language:"en-US"}).catch(err=>{
-        if(err&&err.code==="not_granted"){toast("Permiso de micrófono denegado. Puedes escribir la frase.");}
+        if(err&&err.code==="not_granted"){
+          const m=$("#mic"),n=$("#micnote");if(!m)return;
+          m.insertAdjacentHTML("beforebegin",`<p class="notice">Este navegador no dejó usar el micrófono. Para que Educa escuche tu voz, ábrela en Google Chrome o Microsoft Edge y permite el micrófono. Mientras tanto repite la frase en voz alta tres veces y califícate.</p><div class="selfcheck"><button type="button" data-sc="1">😊 Me salió bien</button><button type="button" data-sc="0">🔁 Necesito practicar</button></div>`);
+          m.remove();if(n)n.remove();$("#heard").hidden=true;DICT_TARGET=null;
+          body.querySelectorAll("[data-sc]").forEach(b=>b.onclick=()=>{body.querySelectorAll("[data-sc]").forEach(x=>x.setAttribute("aria-pressed",x===b));body._score=()=>b.dataset.sc==="1"?1:.5;ready(true);});
+        }
         else if(err&&err.code!=="stopped"&&err.code!=="dismissed"){toast("No pudimos usar el micrófono. Inténtalo de nuevo.");}
       });
     };
@@ -2303,6 +2515,8 @@ function cuenta(){
     <div class="row" style="justify-content:space-between"><span>Puntos XP</span><b>${P.xp}</b></div>
     <div class="row" style="justify-content:space-between"><span>Racha</span><b>${P.streak} ${P.streak===1?"día":"días"}</b></div>
   </section>
+  ${placementSummary(PROFILE.placement,PROFILE.startLevel)}
+  <button class="btn soft block" id="replace">Repetir examen de colocación</button>
   <section class="card"><span class="eyebrow">Preferencias</span>
     <div class="row" style="justify-content:space-between"><span>Tema</span><div class="seg"><button data-th="light" aria-pressed="${theme==="light"}">☀️ Claro</button><button data-th="dark" aria-pressed="${theme==="dark"}">🌙 Oscuro</button></div></div>
     <div class="row" style="justify-content:space-between"><span>Sonidos</span><div class="seg"><button data-sd="on" aria-pressed="${SFX.on()}">🔔 Sí</button><button data-sd="off" aria-pressed="${!SFX.on()}">🔕 No</button></div></div>
@@ -2325,6 +2539,12 @@ function cuenta(){
   const vs=$("#voice"); if(vs) vs.onchange=e=>{PREF.set("voice",e.target.value);say("Hi! This is how I sound.");};
   const vt=$("#vtest"); if(vt) vt.onclick=()=>say("Hi! I'm your English tutor. Let's practice together.");
   $("#logout").onclick=logout;
+  $("#replace").onclick=()=>runPlacement(PROFILE.name.split(" ")[0],async res=>{
+    PROFILE.startLevel=res.level;PROFILE.placementScore=res.gScore;PROFILE.placement=res.placement;
+    await persist("profile",PROFILE);SFX.complete();
+    shell(`<div class="result-ajo">${mascot("cheer",110)}</div><section class="hero" style="text-align:center;align-items:center"><span class="eyebrow">Examen terminado</span><h1>Tu nivel es ${res.level} · ${LEVELS[lvIndex(res.level)].name}</h1><button class="btn" id="enter">Volver a Educa</button></section>${placementSummary(res.placement,res.level)}`);
+    $("#enter").onclick=()=>start();
+  },()=>start());
   $("#reset").onclick=()=>{
     $("#danger").innerHTML=`<div class="card"><p><b>¿Borrar todo tu progreso?</b> Perderás lecciones, XP, racha y textos. Tu cuenta se mantiene.</p>
       <div class="row"><button class="btn" id="yes" style="background:var(--bad);color:#fff">Sí, reiniciar</button><button class="btn ghost" id="no">Cancelar</button></div></div>`;
